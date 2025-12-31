@@ -15,9 +15,9 @@ import {
     Compass,
     Library,
 } from 'lucide-react';
-import { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useLayout } from '../../contexts/LayoutContext';
 import type { UserRole } from '../../types';
 
 interface NavItem {
@@ -89,7 +89,13 @@ const navItems: NavItem[] = [
 ];
 
 export function Sidebar() {
-    const [collapsed, setCollapsed] = useState(false);
+    const {
+        sidebarOpen,
+        sidebarCollapsed,
+        isMobile,
+        toggleCollapse,
+        closeSidebar
+    } = useLayout();
     const { user, logout } = useAuth();
     const { theme, toggleTheme } = useTheme();
     const location = useLocation();
@@ -98,20 +104,27 @@ export function Sidebar() {
         (item) => user && item.roles.includes(user.role)
     );
 
-    const sidebarWidth = collapsed ? 'var(--sidebar-collapsed-width)' : 'var(--sidebar-width)';
+    // Dynamic width based on state
+    const currentWidth = isMobile
+        ? 'var(--sidebar-width)'
+        : sidebarCollapsed
+            ? 'var(--sidebar-collapsed-width)'
+            : 'var(--sidebar-width)';
 
     const sidebarStyles: React.CSSProperties = {
         position: 'fixed',
         top: 0,
         left: 0,
         height: '100vh',
-        width: sidebarWidth,
+        width: currentWidth,
         backgroundColor: 'var(--bg-secondary)',
         borderRight: '1px solid var(--border-default)',
         display: 'flex',
         flexDirection: 'column',
-        transition: 'width var(--transition-base)',
-        zIndex: 100,
+        transition: 'transform var(--transition-base), width var(--transition-base)',
+        zIndex: 50,
+        // Mobile transform logic
+        transform: isMobile && !sidebarOpen ? 'translateX(-100%)' : 'translateX(0)',
     };
 
     const logoStyles: React.CSSProperties = {
@@ -119,7 +132,7 @@ export function Sidebar() {
         borderBottom: '1px solid var(--border-default)',
         display: 'flex',
         alignItems: 'center',
-        justifyContent: collapsed ? 'center' : 'space-between',
+        justifyContent: !isMobile && sidebarCollapsed ? 'center' : 'space-between',
         height: '64px',
     };
 
@@ -136,8 +149,8 @@ export function Sidebar() {
         display: 'flex',
         alignItems: 'center',
         gap: 'var(--space-3)',
-        padding: collapsed ? 'var(--space-3)' : 'var(--space-3) var(--space-4)',
-        justifyContent: collapsed ? 'center' : 'flex-start',
+        padding: !isMobile && sidebarCollapsed ? 'var(--space-3)' : 'var(--space-3) var(--space-4)',
+        justifyContent: !isMobile && sidebarCollapsed ? 'center' : 'flex-start',
         color: isActive ? 'var(--accent-text)' : 'var(--text-secondary)',
         backgroundColor: isActive ? 'var(--accent-light)' : 'transparent',
         textDecoration: 'none',
@@ -153,7 +166,7 @@ export function Sidebar() {
     };
 
     const userInfoStyles: React.CSSProperties = {
-        display: collapsed ? 'none' : 'flex',
+        display: !isMobile && sidebarCollapsed ? 'none' : 'flex',
         flexDirection: 'column',
         marginBottom: 'var(--space-3)',
         padding: 'var(--space-3)',
@@ -163,7 +176,7 @@ export function Sidebar() {
     const actionButtonStyles: React.CSSProperties = {
         display: 'flex',
         alignItems: 'center',
-        justifyContent: collapsed ? 'center' : 'flex-start',
+        justifyContent: !isMobile && sidebarCollapsed ? 'center' : 'flex-start',
         gap: 'var(--space-3)',
         padding: 'var(--space-3)',
         width: '100%',
@@ -175,11 +188,18 @@ export function Sidebar() {
         transition: 'all var(--transition-fast)',
     };
 
+    // Helper to close sidebar on mobile nav click
+    const handleNavClick = () => {
+        if (isMobile) {
+            closeSidebar();
+        }
+    };
+
     return (
         <aside style={sidebarStyles}>
             {/* Logo */}
             <div style={logoStyles}>
-                {!collapsed && (
+                {(!sidebarCollapsed || isMobile) && (
                     <span
                         style={{
                             fontSize: 'var(--text-lg)',
@@ -191,29 +211,52 @@ export function Sidebar() {
                         Nexus
                     </span>
                 )}
-                <button
-                    onClick={() => setCollapsed(!collapsed)}
-                    style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        padding: 'var(--space-2)',
-                        color: 'var(--text-muted)',
-                        backgroundColor: 'transparent',
-                        border: 'none',
-                        cursor: 'pointer',
-                        transition: 'color var(--transition-fast)',
-                    }}
-                    onMouseEnter={(e) => {
-                        e.currentTarget.style.color = 'var(--text-primary)';
-                    }}
-                    onMouseLeave={(e) => {
-                        e.currentTarget.style.color = 'var(--text-muted)';
-                    }}
-                    aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-                >
-                    {collapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
-                </button>
+
+                {/* Desktop Collapse Button */}
+                {!isMobile && (
+                    <button
+                        onClick={toggleCollapse}
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            padding: 'var(--space-2)',
+                            color: 'var(--text-muted)',
+                            backgroundColor: 'transparent',
+                            border: 'none',
+                            cursor: 'pointer',
+                            transition: 'color var(--transition-fast)',
+                        }}
+                        onMouseEnter={(e) => {
+                            e.currentTarget.style.color = 'var(--text-primary)';
+                        }}
+                        onMouseLeave={(e) => {
+                            e.currentTarget.style.color = 'var(--text-muted)';
+                        }}
+                        aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                    >
+                        {sidebarCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+                    </button>
+                )}
+
+                {/* Mobile Close Button */}
+                {isMobile && (
+                    <button
+                        onClick={closeSidebar}
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            padding: 'var(--space-2)',
+                            color: 'var(--text-muted)',
+                            backgroundColor: 'transparent',
+                            border: 'none',
+                            cursor: 'pointer',
+                        }}
+                    >
+                        <ChevronLeft size={20} />
+                    </button>
+                )}
             </div>
 
             {/* Navigation */}
@@ -222,6 +265,7 @@ export function Sidebar() {
                     <NavLink
                         key={item.path}
                         to={item.path}
+                        onClick={handleNavClick}
                         style={({ isActive }) => navLinkStyles(isActive)}
                         onMouseEnter={(e) => {
                             if (!location.pathname.startsWith(item.path)) {
@@ -233,12 +277,12 @@ export function Sidebar() {
                                 e.currentTarget.style.backgroundColor = 'transparent';
                             }
                         }}
-                        title={collapsed ? item.label : undefined}
+                        title={(!isMobile && sidebarCollapsed) ? item.label : undefined}
                     >
                         <span style={{ display: 'flex', alignItems: 'center' }}>
                             {item.icon}
                         </span>
-                        {!collapsed && <span>{item.label}</span>}
+                        {(!sidebarCollapsed || isMobile) && <span>{item.label}</span>}
                     </NavLink>
                 ))}
             </nav>
@@ -282,12 +326,15 @@ export function Sidebar() {
                     }}
                 >
                     {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
-                    {!collapsed && <span>{theme === 'light' ? 'Dark mode' : 'Light mode'}</span>}
+                    {(!sidebarCollapsed || isMobile) && <span>{theme === 'light' ? 'Dark mode' : 'Light mode'}</span>}
                 </button>
 
                 {/* Logout */}
                 <button
-                    onClick={logout}
+                    onClick={() => {
+                        logout();
+                        handleNavClick();
+                    }}
                     style={{ ...actionButtonStyles, color: 'var(--danger)' }}
                     onMouseEnter={(e) => {
                         e.currentTarget.style.backgroundColor = 'var(--danger-light)';
@@ -297,7 +344,7 @@ export function Sidebar() {
                     }}
                 >
                     <LogOut size={18} />
-                    {!collapsed && <span>Sign out</span>}
+                    {(!sidebarCollapsed || isMobile) && <span>Sign out</span>}
                 </button>
             </div>
         </aside>

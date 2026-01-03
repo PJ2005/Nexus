@@ -147,7 +147,8 @@ export async function addTaskToTodaySchedule(
         startTime: slot.start,
         endTime: slot.end,
         title: task.title,
-        type: 'event',
+        type: 'personal',
+        taskId: task.id,
         completed: false,
         priority: 'medium',
     };
@@ -179,38 +180,70 @@ export async function addTaskToTodaySchedule(
 }
 
 export function shouldTaskRunOnDate(task: SmartTask, date: string): boolean {
-    const dayOfWeek = new Date(date).getDay();
-    const dateObj = new Date(date);
+    // Parse date string (YYYY-MM-DD) correctly to avoid timezone issues
+    const [year, month, day] = date.split('-').map(Number);
+    const dateObj = new Date(year, month - 1, day); // Local midnight
+    const dayOfWeek = dateObj.getDay();
+
     const startDate = task.startDate.toDate();
+    // Normalize startDate to local midnight for comparison
+    const startDateNormalized = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+
+    // Debug logging
+    console.log(`[shouldTaskRunOnDate] Task "${task.title}":`, {
+        inputDate: date,
+        dateObj: dateObj.toISOString(),
+        startDate: startDate.toISOString(),
+        startDateNormalized: startDateNormalized.toISOString(),
+        recurrence: task.recurrence,
+        dayOfWeek,
+        comparison: dateObj >= startDateNormalized ? 'OK' : 'BEFORE_START',
+    });
 
     // Check if date is before start date
-    if (dateObj < startDate) {
+    if (dateObj < startDateNormalized) {
+        console.log(`[shouldTaskRunOnDate] Task "${task.title}" FAILED: date before start`);
         return false;
     }
 
     // Check if date is after end date
-    if (task.endDate && dateObj > task.endDate.toDate()) {
-        return false;
+    if (task.endDate) {
+        const endDate = task.endDate.toDate();
+        const endDateNormalized = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+        if (dateObj > endDateNormalized) {
+            console.log(`[shouldTaskRunOnDate] Task "${task.title}" FAILED: date after end`);
+            return false;
+        }
     }
 
+    let result = false;
     switch (task.recurrence) {
         case 'once':
             // Only on the start date
-            return date === getDateString(startDate);
+            result = date === getDateString(startDate);
+            break;
         case 'daily':
-            return true;
+            result = true;
+            break;
         case 'weekdays':
-            return dayOfWeek >= 1 && dayOfWeek <= 5;
+            result = dayOfWeek >= 1 && dayOfWeek <= 5;
+            break;
         case 'weekends':
-            return dayOfWeek === 0 || dayOfWeek === 6;
+            result = dayOfWeek === 0 || dayOfWeek === 6;
+            break;
         case 'weekly':
             // Same day of week as start date
-            return dayOfWeek === startDate.getDay();
+            result = dayOfWeek === startDate.getDay();
+            break;
         case 'custom':
-            return task.daysOfWeek?.includes(dayOfWeek) || false;
+            result = task.daysOfWeek?.includes(dayOfWeek) || false;
+            break;
         default:
-            return false;
+            result = false;
     }
+
+    console.log(`[shouldTaskRunOnDate] Task "${task.title}" recurrence check: ${result}`);
+    return result;
 }
 
 async function findAvailableSlot(

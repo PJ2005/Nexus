@@ -196,17 +196,23 @@ export async function getSchedulesInRange(
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as Schedule);
 }
 
-export async function saveSchedule(schedule: Omit<Schedule, 'id'>): Promise<string> {
+export async function saveSchedule(schedule: Omit<Schedule, 'id'> | Schedule): Promise<string> {
     // Check if schedule for this date already exists
     const existing = await getSchedule(schedule.studentId, schedule.date);
 
-    if (existing) {
-        // Update existing
-        await updateDoc(doc(db, 'schedules', existing.id), schedule);
+    // Strip id field if present (it might be passed as empty string from addTaskToTodaySchedule)
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { id: _id, ...scheduleData } = schedule as Schedule;
+
+    if (existing && existing.id) {
+        // Update existing - only if we have a valid id
+        console.log('[saveSchedule] Updating existing schedule:', existing.id);
+        await updateDoc(doc(db, 'schedules', existing.id), scheduleData);
         return existing.id;
     } else {
         // Create new
-        const docRef = await addDoc(collection(db, 'schedules'), schedule);
+        console.log('[saveSchedule] Creating new schedule');
+        const docRef = await addDoc(collection(db, 'schedules'), scheduleData);
         return docRef.id;
     }
 }
@@ -216,6 +222,10 @@ export async function updateScheduleItem(
     itemId: string,
     updates: Partial<ScheduleItem>
 ): Promise<void> {
+    if (!scheduleId) {
+        console.warn('updateScheduleItem: No scheduleId provided');
+        return;
+    }
     const scheduleRef = doc(db, 'schedules', scheduleId);
     const scheduleSnap = await getDoc(scheduleRef);
 
@@ -239,6 +249,10 @@ export async function updateScheduleItem(
 }
 
 export async function deleteSchedule(scheduleId: string): Promise<void> {
+    if (!scheduleId) {
+        console.warn('deleteSchedule: No scheduleId provided');
+        return;
+    }
     await deleteDoc(doc(db, 'schedules', scheduleId));
 }
 
@@ -429,13 +443,26 @@ export async function generateSchedule(
     const { getSmartTasks, shouldTaskRunOnDate } = await import('./taskService');
     const allTasks = await getSmartTasks(studentId);
 
+    // Debug logging to trace task filtering
+    console.log('[Schedule] All tasks for student:', allTasks.length);
+
     // Filter tasks for today
-    const todaysTasks = allTasks.filter(t =>
-        !t.archived &&
-        !t.completed &&
-        t.autoSchedule &&
-        shouldTaskRunOnDate(t, date)
-    );
+    const todaysTasks = allTasks.filter(t => {
+        const isActive = !t.archived && !t.completed && t.autoSchedule;
+        const shouldRun = shouldTaskRunOnDate(t, date);
+
+        if (!isActive) {
+            console.log(`[Schedule] Task "${t.title}" skipped: archived=${t.archived}, completed=${t.completed}, autoSchedule=${t.autoSchedule}`);
+        } else if (!shouldRun) {
+            console.log(`[Schedule] Task "${t.title}" skipped: shouldTaskRunOnDate returned false for date ${date}`);
+        } else {
+            console.log(`[Schedule] Task "${t.title}" INCLUDED for ${date}`);
+        }
+
+        return isActive && shouldRun;
+    });
+
+    console.log('[Schedule] Tasks to include for today:', todaysTasks.map(t => t.title));
 
     const personalTasksForAI = todaysTasks.map(t => ({
         id: t.id,
@@ -502,6 +529,9 @@ export async function editScheduleWithNaturalLanguage(
     scheduleId: string,
     userInput: string
 ): Promise<{ success: boolean; message: string; schedule?: Schedule }> {
+    if (!scheduleId) {
+        return { success: false, message: 'No schedule ID provided' };
+    }
     const scheduleRef = doc(db, 'schedules', scheduleId);
     const scheduleSnap = await getDoc(scheduleRef);
 
@@ -512,8 +542,15 @@ export async function editScheduleWithNaturalLanguage(
     const schedule = { id: scheduleSnap.id, ...scheduleSnap.data() } as Schedule;
 
     try {
-        // Use AI to parse the natural language command
-        const result = await parseNaturalLanguageEdit(userInput, schedule.items);
+        // Get student preferences for time constraints
+        const profile = await getStudentProfile(schedule.studentId);
+        const preferences = profile?.preferences || DEFAULT_PREFERENCES;
+
+        // Use AI to parse the natural language command with time constraints
+        const result = await parseNaturalLanguageEdit(userInput, schedule.items, {
+            startTime: preferences.preferredStartTime,
+            endTime: preferences.preferredEndTime,
+        });
 
         if (!result.success) {
             return { success: false, message: result.message || 'Could not understand the request' };

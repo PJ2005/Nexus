@@ -151,7 +151,7 @@ export interface ScheduleItem {
     endTime: string;
     title: string;
     description?: string;
-    type: 'lesson' | 'break' | 'assignment' | 'review' | 'event';
+    type: 'lesson' | 'break' | 'assignment' | 'review' | 'event' | 'personal';
     completed: boolean;
     priority: 'high' | 'medium' | 'low';
 }

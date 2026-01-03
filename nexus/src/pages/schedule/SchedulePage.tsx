@@ -301,12 +301,16 @@ export function SchedulePage() {
             case 'break': return <Coffee size={16} />;
             case 'assignment': return <FileText size={16} />;
             case 'review': return <RefreshCw size={16} />;
+            case 'personal': return <Target size={16} />;
+            case 'event': return <Calendar size={16} />;
             default: return <Clock size={16} />;
         }
     }
 
     function getItemColor(type: ScheduleItem['type'], priority: ScheduleItem['priority']) {
         if (type === 'break') return 'var(--text-muted)';
+        if (type === 'personal') return 'var(--warning)';
+        if (type === 'event') return 'var(--info)';
         switch (priority) {
             case 'high': return 'var(--error)';
             case 'medium': return 'var(--accent)';

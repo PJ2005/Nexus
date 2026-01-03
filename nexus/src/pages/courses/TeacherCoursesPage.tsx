@@ -5,12 +5,15 @@ import { PageLayout } from '../../components/layout';
 import { Button, Card } from '../../components/ui';
 import { useAuth } from '../../contexts/AuthContext';
 import { getTeacherCourses, deleteCourse, updateCourse } from '../../services/courseService';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { db } from '../../lib/firebase';
 import type { Course, CourseStatus } from '../../types';
 
 export function TeacherCoursesPage() {
     const { user } = useAuth();
     const navigate = useNavigate();
     const [courses, setCourses] = useState<Course[]>([]);
+    const [enrollmentCounts, setEnrollmentCounts] = useState<Record<string, number>>({});
     const [loading, setLoading] = useState(true);
     const [activeMenu, setActiveMenu] = useState<string | null>(null);
 
@@ -25,6 +28,18 @@ export function TeacherCoursesPage() {
         try {
             const data = await getTeacherCourses(user.uid);
             setCourses(data);
+
+            // Fetch actual enrollment counts for each course
+            const counts: Record<string, number> = {};
+            for (const course of data) {
+                const enrollmentsQuery = query(
+                    collection(db, 'enrollments'),
+                    where('courseId', '==', course.id)
+                );
+                const enrollmentsSnap = await getDocs(enrollmentsQuery);
+                counts[course.id] = enrollmentsSnap.size;
+            }
+            setEnrollmentCounts(counts);
         } catch (error) {
             console.error('Failed to load courses:', error);
         } finally {
@@ -402,7 +417,7 @@ export function TeacherCoursesPage() {
                                         }}
                                     >
                                         <Users size={14} />
-                                        <span>{course.enrolledCount} enrolled</span>
+                                        <span>{enrollmentCounts[course.id] || 0} enrolled</span>
                                     </div>
                                 </div>
                             </div>

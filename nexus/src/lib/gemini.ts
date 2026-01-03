@@ -167,16 +167,61 @@ Return ONLY a valid JSON array with NO additional text, markdown, or explanation
             jsonStr = arrayMatch[0];
         }
 
-        const items = JSON.parse(jsonStr) as ScheduleItem[];
+        let items = JSON.parse(jsonStr) as ScheduleItem[];
 
         // Validate and fix items
-        return items.map(item => ({
+        items = items.map(item => ({
             ...item,
             id: item.id || crypto.randomUUID(),
             completed: false,
             priority: item.priority || 'medium',
             type: item.type || 'lesson',
         }));
+
+        // POST-GENERATION VALIDATION: Inject missing personal tasks
+        if (params.personalTasks && params.personalTasks.length > 0) {
+            const scheduledTaskIds = new Set(items.filter(i => i.taskId).map(i => i.taskId));
+
+            for (const task of params.personalTasks) {
+                if (!scheduledTaskIds.has(task.id)) {
+                    // This task was not scheduled by AI - inject it
+                    console.warn(`AI missed personal task: ${task.title}, injecting...`);
+
+                    let taskStartTime: string;
+                    if (task.specificTime) {
+                        taskStartTime = task.specificTime;
+                    } else {
+                        // Use preferred time range
+                        switch (task.preferredTime) {
+                            case 'morning': taskStartTime = '08:00'; break;
+                            case 'afternoon': taskStartTime = '14:00'; break;
+                            case 'evening': taskStartTime = '18:00'; break;
+                            case 'night': taskStartTime = '21:00'; break;
+                            default: taskStartTime = '10:00';
+                        }
+                    }
+
+                    const taskEndTime = addMinutes(taskStartTime, task.duration);
+
+                    items.push({
+                        id: crypto.randomUUID(),
+                        startTime: taskStartTime,
+                        endTime: taskEndTime,
+                        title: task.title,
+                        description: 'Personal task',
+                        type: 'personal',
+                        taskId: task.id,
+                        completed: false,
+                        priority: 'medium',
+                    });
+                }
+            }
+
+            // Re-sort after injection
+            items.sort((a, b) => compareTime(a.startTime, b.startTime));
+        }
+
+        return items;
     } catch (error) {
         console.error('Failed to generate schedule with AI:', error);
         return generateFallbackSchedule(params);
@@ -188,13 +233,85 @@ function generateFallbackSchedule(params: ScheduleGenerationParams): ScheduleIte
     let currentTime = params.preferences.preferredStartTime;
     let sessionCount = 0;
 
+    // Helper to get time range for preferred time of day
+    const getTimeRange = (preferredTime: string): { start: string; end: string } => {
+        switch (preferredTime) {
+            case 'morning': return { start: '06:00', end: '12:00' };
+            case 'afternoon': return { start: '12:00', end: '17:00' };
+            case 'evening': return { start: '17:00', end: '21:00' };
+            case 'night': return { start: '21:00', end: '23:59' };
+            default: return { start: params.preferences.preferredStartTime, end: params.preferences.preferredEndTime };
+        }
+    };
+
+    // FIRST: Schedule all personal tasks
+    if (params.personalTasks && params.personalTasks.length > 0) {
+        for (const task of params.personalTasks) {
+            let taskStartTime: string;
+
+            if (task.specificTime) {
+                taskStartTime = task.specificTime;
+            } else {
+                const range = getTimeRange(task.preferredTime);
+                taskStartTime = range.start;
+            }
+
+            const taskEndTime = addMinutes(taskStartTime, task.duration);
+
+            items.push({
+                id: crypto.randomUUID(),
+                startTime: taskStartTime,
+                endTime: taskEndTime,
+                title: task.title,
+                description: 'Personal task',
+                type: 'personal',
+                taskId: task.id,
+                completed: false,
+                priority: 'medium',
+            });
+        }
+    }
+
+    // Sort personal tasks by start time
+    items.sort((a, b) => compareTime(a.startTime, b.startTime));
+
+    // Helper to check if a time slot overlaps with existing items
+    const isSlotFree = (start: string, end: string): boolean => {
+        for (const item of items) {
+            if (compareTime(start, item.endTime) < 0 && compareTime(end, item.startTime) > 0) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    // SECOND: Schedule lessons around personal tasks
     for (const lesson of params.pendingLessons.slice(0, 5)) {
+        let slotStart = currentTime;
+        const lessonDuration = params.preferences.preferredSessionLength;
+        let slotEnd = addMinutes(slotStart, lessonDuration);
+
+        // Skip if we've exceeded available time
+        if (compareTime(slotStart, params.preferences.preferredEndTime) >= 0) {
+            break;
+        }
+
+        // Find a free slot
+        while (!isSlotFree(slotStart, slotEnd) && compareTime(slotEnd, params.preferences.preferredEndTime) < 0) {
+            slotStart = addMinutes(slotStart, 15);
+            slotEnd = addMinutes(slotStart, lessonDuration);
+        }
+
+        // Skip if no slot found
+        if (compareTime(slotEnd, params.preferences.preferredEndTime) > 0) {
+            break;
+        }
+
         // Add lesson
-        const endTime = addMinutes(currentTime, params.preferences.preferredSessionLength);
         items.push({
             id: crypto.randomUUID(),
-            startTime: currentTime,
-            endTime,
+            startTime: slotStart,
+            endTime: slotEnd,
             title: lesson.lessonTitle,
             description: `From ${lesson.courseTitle}`,
             type: 'lesson',
@@ -205,32 +322,34 @@ function generateFallbackSchedule(params: ScheduleGenerationParams): ScheduleIte
         });
 
         sessionCount++;
-        currentTime = endTime;
+        currentTime = slotEnd;
 
-        // Add break
+        // Add break if there's room
         const breakLength = sessionCount % params.preferences.longBreakAfter === 0
             ? params.preferences.longBreakLength
             : params.preferences.breakLength;
 
         const breakEnd = addMinutes(currentTime, breakLength);
-        items.push({
-            id: crypto.randomUUID(),
-            startTime: currentTime,
-            endTime: breakEnd,
-            title: sessionCount % params.preferences.longBreakAfter === 0 ? 'Long Break' : 'Short Break',
-            description: 'Take a rest',
-            type: 'break',
-            completed: false,
-            priority: 'low',
-        });
 
-        currentTime = breakEnd;
-
-        // Stop if we've exceeded available time
-        if (compareTime(currentTime, params.preferences.preferredEndTime) >= 0) {
-            break;
+        if (compareTime(breakEnd, params.preferences.preferredEndTime) <= 0 && isSlotFree(currentTime, breakEnd)) {
+            items.push({
+                id: crypto.randomUUID(),
+                startTime: currentTime,
+                endTime: breakEnd,
+                title: sessionCount % params.preferences.longBreakAfter === 0 ? 'Long Break' : 'Short Break',
+                description: 'Take a rest',
+                type: 'break',
+                completed: false,
+                priority: 'low',
+            });
+            currentTime = breakEnd;
+        } else {
+            currentTime = addMinutes(currentTime, 5);
         }
     }
+
+    // Final sort by start time
+    items.sort((a, b) => compareTime(a.startTime, b.startTime));
 
     return items;
 }
@@ -247,11 +366,15 @@ interface NLEditResult {
 
 export async function parseNaturalLanguageEdit(
     userInput: string,
-    currentItems: ScheduleItem[]
+    currentItems: ScheduleItem[],
+    timeConstraints?: { startTime: string; endTime: string }
 ): Promise<NLEditResult> {
     if (!genai) {
         return { success: false, message: 'AI features are not available' };
     }
+
+    const startBound = timeConstraints?.startTime || '06:00';
+    const endBound = timeConstraints?.endTime || '22:00';
 
     const prompt = `You are a schedule editing assistant. Parse the user's natural language command and modify the schedule accordingly.
 
@@ -259,6 +382,12 @@ CURRENT SCHEDULE:
 ${JSON.stringify(currentItems, null, 2)}
 
 USER COMMAND: "${userInput}"
+
+**CRITICAL TIME CONSTRAINTS**:
+- Earliest allowed start time: ${startBound}
+- Latest allowed end time: ${endBound}
+- DO NOT schedule ANY items before ${startBound} or after ${endBound}
+- If the user requests something that would exceed these bounds, politely decline and explain why
 
 Common commands include:
 - "Move X to Y time" - Change the start time of an item
@@ -282,6 +411,7 @@ IMPORTANT:
 - When moving items, adjust all subsequent items' times appropriately
 - Maintain the same total duration for moved items
 - Keep breaks appropriately spaced
+- NEVER schedule items outside ${startBound} - ${endBound} range
 - Return ONLY valid JSON, no markdown or extra text`;
 
     try {
@@ -304,7 +434,33 @@ IMPORTANT:
             jsonStr = objMatch[0];
         }
 
-        return JSON.parse(jsonStr) as NLEditResult;
+        const result = JSON.parse(jsonStr) as NLEditResult;
+
+        // Post-processing: Validate and clip items that exceed time bounds
+        if (result.success && result.updatedItems) {
+            result.updatedItems = result.updatedItems.map(item => {
+                // Clip start time
+                if (compareTime(item.startTime, startBound) < 0) {
+                    item.startTime = startBound;
+                }
+                // Clip end time
+                if (compareTime(item.endTime, endBound) > 0) {
+                    item.endTime = endBound;
+                }
+                // Handle case where start > end after clipping
+                if (compareTime(item.startTime, item.endTime) >= 0) {
+                    // Skip this item by setting a minimal duration
+                    const [h, m] = item.startTime.split(':').map(Number);
+                    const endMins = h * 60 + m + 15; // minimum 15 min
+                    const endH = Math.floor(endMins / 60);
+                    const endM = endMins % 60;
+                    item.endTime = `${endH.toString().padStart(2, '0')}:${endM.toString().padStart(2, '0')}`;
+                }
+                return item;
+            }).filter(item => compareTime(item.startTime, endBound) < 0); // Remove items completely out of bounds
+        }
+
+        return result;
     } catch (error) {
         console.error('Failed to parse natural language edit:', error);
         return {

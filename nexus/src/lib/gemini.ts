@@ -125,22 +125,24 @@ Create an optimized schedule that:
    - If a preference is set (e.g., "PREFER: evening"), place it strictly within the defined time range (e.g., 17:00-21:00).
 2. Respects the available time slots and avoids blocked times.
 3. Includes regular breaks following the Pomodoro-style preferences.
-4. Prioritizes high-priority assignments and lessons around the personal tasks.
-5. Schedules harder/important tasks during focus hours.
-6. Balances variety - don't schedule the same course consecutively if possible.
-7. Includes a long break after every ${params.preferences.longBreakAfter} study sessions.
+4. **CRITICAL**: ONLY create "lesson" type items for lessons that are EXPLICITLY listed in the PENDING LESSONS section above. Each lesson item MUST use the exact courseId and lessonId from that list. Do NOT invent or generate any generic "study session", "learning session", or similar items.
+5. **CRITICAL**: ONLY create "assignment" type items for assignments that are EXPLICITLY listed in the PENDING ASSIGNMENTS section above. Each assignment item MUST use the exact id and courseId from that list.
+6. **CRITICAL**: If PENDING LESSONS shows "None", generate ZERO lesson items. If PENDING ASSIGNMENTS shows "None", generate ZERO assignment items. Only include personal tasks and breaks in this case.
+7. Prioritizes high-priority items during focus hours.
+8. Balances variety - don't schedule the same course consecutively if possible.
+9. Includes a long break after every ${params.preferences.longBreakAfter} sessions.
 
 Return ONLY a valid JSON array with NO additional text, markdown, or explanation. Each object must have:
 {
   "id": "unique-uuid-string",
   "startTime": "HH:MM",
   "endTime": "HH:MM", 
-  "title": "descriptive title",
+  "title": "descriptive title (MUST be from the PENDING LESSONS/ASSIGNMENTS lists, never generic)",
   "description": "brief description",
   "type": "lesson" | "break" | "assignment" | "review" | "personal",
-  "courseId": "course-id or null",
-  "lessonId": "lesson-id or null",
-  "assignmentId": "assignment-id or null",
+  "courseId": "course-id or null (MUST match the provided courseId for lessons/assignments)",
+  "lessonId": "lesson-id or null (MUST match the provided lessonId for lessons)",
+  "assignmentId": "assignment-id or null (MUST match the provided id for assignments)",
   "taskId": "task-id or null (for personal tasks)",
   "completed": false,
   "priority": "high" | "medium" | "low"

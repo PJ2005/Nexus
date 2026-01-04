@@ -38,6 +38,12 @@ Students often struggle to manage their study time effectively. Traditional LMS 
 
 ---
 
+## Mobile App
+
+Nexus is also available as an Android mobile app. All data syncs seamlessly between web and mobile — courses, schedules, progress, and tasks stay in sync across devices. To use the mobile app, download the APK file `nexus-app.apk` from the repository, install it on your Android device, and log in with your existing account.
+
+---
+
 ## Technical Architecture
 
 ### Data Models
